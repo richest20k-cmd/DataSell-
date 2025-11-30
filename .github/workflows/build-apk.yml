@@ -35,23 +35,30 @@ jobs:
           wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
           unzip cmdline-tools.zip
           rm cmdline-tools.zip
+          mv cmdline-tools latest   # FIXED!
 
       - name: Accept licenses
         run: |
           mkdir -p $HOME/.android && touch $HOME/.android/repositories.cfg
-          yes | $HOME/android-sdk/cmdline-tools/cmdline-tools/bin/sdkmanager --licenses || true
+          yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Install Android SDK components
         env:
           ANDROID_HOME: $HOME/android-sdk
-          PATH: $HOME/android-sdk/cmdline-tools/cmdline-tools/bin:$HOME/android-sdk/platform-tools:$PATH
+          PATH: $HOME/android-sdk/cmdline-tools/latest/bin:$HOME/android-sdk/platform-tools:$PATH
         run: |
-          sdkmanager --sdk_root=$HOME/android-sdk "platform-tools" "platforms;android-33" "build-tools;33.0.2" "platforms;android-31" "build-tools;31.0.0" "ndk;21.4.7075529"
+          sdkmanager --sdk_root=$HOME/android-sdk \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2" \
+            "platforms;android-31" \
+            "build-tools;31.0.0" \
+            "ndk;21.4.7075529"
 
       - name: Add Android SDK to PATH
         run: |
           echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "$HOME/android-sdk/platform-tools:$HOME/android-sdk/cmdline-tools/cmdline-tools/bin" >> $GITHUB_PATH
+          echo "$HOME/android-sdk/platform-tools:$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -74,7 +81,7 @@ jobs:
         env:
           JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
           ANDROID_SDK_ROOT: $HOME/android-sdk
-          PATH: $HOME/android-sdk/platform-tools:$HOME/android-sdk/cmdline-tools/cmdline-tools/bin:$PATH
+          PATH: $HOME/android-sdk/platform-tools:$HOME/android-sdk/cmdline-tools/latest/bin:$PATH
         run: |
           chmod +x build-apk.sh
           ./build-apk.sh
