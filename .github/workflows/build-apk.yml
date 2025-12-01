@@ -14,7 +14,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Use JDK 17 instead of 11 (required by newer Android SDK)
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -24,17 +23,126 @@ jobs:
       - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget unzip
+          sudo apt-get install -y wget unzip imagemagick
 
-      - name: Install older Android SDK cmdline tools (compatible with JDK 11 if needed)
+      - name: Install Android SDK with old tools directory
         run: |
           mkdir -p $HOME/android-sdk
           cd /tmp
-          # Download an older version that works with JDK 11
+          
+          # Download command line tools
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
           unzip -q commandlinetools-linux-9477386_latest.zip
           mkdir -p $HOME/android-sdk/cmdline-tools
           mv cmdline-tools $HOME/android-sdk/cmdline-tools/latest
+          
+          # Set environment variables
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+
+      - name: Accept Android licenses
+        run: |
+          mkdir -p $HOME/.android
+          touch $HOME/.android/repositories.cfg
+          yes | sdkmanager --licenses || true
+
+      - name: Install Android SDK components (including legacy tools)
+        run: |
+          # Install legacy tools first (Cordova needs this)
+          sdkmanager --verbose "tools"
+          
+          # Install platform-tools (includes adb)
+          sdkmanager --verbose "platform-tools"
+          
+          # Install other components
+          sdkmanager --verbose \
+            "platforms;android-33" \
+            "build-tools;33.0.2" \
+            "platforms;android-31" \
+            "build-tools;31.0.0" \
+            "ndk;21.4.7075529"
+          
+          # Create symlink for compatibility (Cordova looks for tools/bin)
+          ln -sf $ANDROID_SDK_ROOT/cmdline-tools/latest $ANDROID_SDK_ROOT/tools || true
+          
+          # Verify installation
+          echo "=== SDK Contents ==="
+          ls -la $ANDROID_SDK_ROOT/
+          echo "=== tools directory ==="
+          ls -la $ANDROID_SDK_ROOT/tools/bin/ || echo "tools/bin not found"
+          echo "=== platform-tools ==="
+          ls -la $ANDROID_SDK_ROOT/platform-tools/
+
+      - name: Add all Android tools to PATH
+        run: |
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+          echo "$ANDROID_SDK_ROOT/tools/bin" >> $GITHUB_PATH
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$ANDROID_SDK_ROOT/build-tools/33.0.2" >> $GITHUB_PATH
+
+      - name: Install Node.js and Cordova
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Install Cordova CLI
+        run: |
+          npm install -g cordova@latest
+          cordova --version
+
+      - name: Install project dependencies
+        working-directory: ./android-wrapper
+        run: |
+          npm ci || npm install
+
+      - name: Copy public into wrapper
+        working-directory: ./android-wrapper
+        run: |
+          rm -rf www || true
+          cp -r ../public ./www
+
+      - name: Fix Cordova Android platform compatibility
+        working-directory: ./android-wrapper
+        run: |
+          # Remove old platform if exists
+          rm -rf platforms/android || true
+          
+          # Add Android platform with specific version compatible with SDK 33
+          cordova platform add android@12.0.0
+          
+          # OR if you need older compatibility:
+          # cordova platform add android@11.0.0
+
+      - name: Build APK (Cordova)
+        working-directory: ./android-wrapper
+        env:
+          ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT
+          ANDROID_HOME: $ANDROID_SDK_ROOT
+        run: |
+          # Debug info
+          echo "=== Environment ==="
+          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          echo "JAVA_HOME: $JAVA_HOME"
+          echo "PATH contains Android tools:"
+          echo $PATH | tr ':' '\n' | grep android
+          
+          echo "=== Cordova Android requirements ==="
+          cordova requirements android
+          
+          echo "=== Running build script ==="
+          chmod +x build-apk.sh
+          ./build-apk.sh
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: datasell-debug-apk
+          path: |
+            android-wrapper/platforms/android/app/build/outputs/apk/debug/*.apk
+            android-wrapper/platforms/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn          mv cmdline-tools $HOME/android-sdk/cmdline-tools/latest
           
           # Set environment variables
           echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
