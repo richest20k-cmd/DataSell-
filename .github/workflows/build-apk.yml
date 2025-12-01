@@ -44,8 +44,14 @@ jobs:
           echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
           mkdir -p $HOME/.android
-          touch $HOME/.android/repositories.cfg
-
+      touch $HOME/.android/repositories.cfg
+      
+    - name: Install Gradle 7.5.1
+  run: |
+    wget https://services.gradle.org/distributions/gradle-7.5.1-bin.zip
+    unzip -q gradle-7.5.1-bin.zip
+    echo "GRADLE_HOME=$PWD/gradle-7.5.1" >> $GITHUB_ENV
+    echo "$PWD/gradle-7.5.1/bin" >> $GITHUB_PATH
       # Accept licenses
       - name: Accept Licenses
         run: |
