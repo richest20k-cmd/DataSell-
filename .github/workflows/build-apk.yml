@@ -10,9 +10,6 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
 
-    env:
-      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,38 +23,47 @@ jobs:
       - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget unzip openjdk-11-jdk
+          sudo apt-get install -y wget unzip
 
       - name: Install Android SDK cmdline tools
         run: |
+          mkdir -p $HOME/android-sdk
+          cd /tmp
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q commandlinetools-linux-9477386_latest.zip
           mkdir -p $HOME/android-sdk/cmdline-tools
-          cd $HOME/android-sdk/cmdline-tools
-          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          unzip cmdline-tools.zip
-          rm cmdline-tools.zip
-          mv cmdline-tools latest   # FIXED!
+          mv cmdline-tools $HOME/android-sdk/cmdline-tools/latest
+          rm commandlinetools-linux-9477386_latest.zip
 
-      - name: Accept licenses
+      - name: Accept licenses and install SDK components
         run: |
-          mkdir -p $HOME/.android && touch $HOME/.android/repositories.cfg
-          yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-      - name: Install Android SDK components
-        env:
-          ANDROID_HOME: $HOME/android-sdk
-          PATH: $HOME/android-sdk/cmdline-tools/latest/bin:$HOME/android-sdk/platform-tools:$PATH
-        run: |
-          sdkmanager --sdk_root=$HOME/android-sdk \
+          # Set environment variables for this step
+          export ANDROID_SDK_ROOT=$HOME/android-sdk
+          export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH
+          
+          # Create required directory
+          mkdir -p $HOME/.android
+          touch $HOME/.android/repositories.cfg
+          
+          # Accept licenses (non-interactive)
+          yes | sdkmanager --licenses
+          
+          # Install Android components
+          sdkmanager --verbose \
             "platform-tools" \
             "platforms;android-33" \
             "build-tools;33.0.2" \
             "platforms;android-31" \
             "build-tools;31.0.0" \
             "ndk;21.4.7075529"
+          
+          # List installed components to verify
+          sdkmanager --list
 
-      - name: Add Android SDK to PATH
+      - name: Add Android SDK to PATH globally
         run: |
           echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
           echo "$HOME/android-sdk/platform-tools:$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
       - name: Install Node.js
@@ -68,7 +74,7 @@ jobs:
       - name: Install project dependencies
         working-directory: ./android-wrapper
         run: |
-          npm ci || true
+          npm ci || npm install
 
       - name: Copy public into wrapper
         working-directory: ./android-wrapper
@@ -79,10 +85,14 @@ jobs:
       - name: Build APK (Cordova)
         working-directory: ./android-wrapper
         env:
-          JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
           ANDROID_SDK_ROOT: $HOME/android-sdk
-          PATH: $HOME/android-sdk/platform-tools:$HOME/android-sdk/cmdline-tools/latest/bin:$PATH
+          ANDROID_HOME: $HOME/android-sdk
         run: |
+          # Verify Android SDK is accessible
+          echo "Android SDK path: $ANDROID_SDK_ROOT"
+          ls -la $ANDROID_SDK_ROOT/platform-tools/adb || echo "ADB not found"
+          
+          # Make script executable and run it
           chmod +x build-apk.sh
           ./build-apk.sh
 
