@@ -16,21 +16,19 @@ jobs:
       PATH: $HOME/gradle/gradle-7.5.1/bin:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
 
     steps:
-    # Step 1: Install essential packages
-    - name: Install dependencies
-  run: apt-get install -y <your-dependency>
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y tar unzip curl git openjdk-11-jdk
 
-    # Step 2: Checkout repo
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # Step 3: Setup Node.js
     - name: Setup Node.js
       uses: actions/setup-node@v3
       with:
         node-version: '18'
 
-    # Step 4: Install Cordova & Gradle
     - name: Install Cordova & Gradle
       run: |
         npm install -g cordova
@@ -38,7 +36,6 @@ jobs:
         curl -sSL https://services.gradle.org/distributions/gradle-7.5.1-bin.zip -o gradle-7.5.1-bin.zip
         unzip -qq gradle-7.5.1-bin.zip -d $HOME/gradle
 
-    # Step 5: Setup Android SDK
     - name: Setup Android SDK
       run: |
         mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
@@ -47,25 +44,31 @@ jobs:
         yes | $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/bin/sdkmanager --licenses
         $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/bin/sdkmanager "platform-tools" "platforms;android-32" "build-tools;32.0.0"
 
-    # Step 6: Create Cordova project if missing
     - name: Create Cordova project
       run: |
         if [ ! -f config.xml ]; then
           cordova create . com.datasell.app DataSellApp
         fi
 
-    # Step 7: Add Android platform (10.1.1 for compatibility)
     - name: Add Android platform
       run: |
         cordova platform remove android || true
         cordova platform add android@10.1.1
 
-    # Step 8: Build APK
-    - name: Build Android APK
+    - name: Decode Keystore
+      run: |
+        echo ${{ secrets.KEYSTORE_BASE64 }} | base64 --decode > my-release-key.jks
+
+    - name: Build Release APK
       run: |
         cordova build android --release --no-telemetry
 
-    # Step 9: List APK outputs
+    - name: Sign and Align APK
+      run: |
+        APK_PATH=$(find platforms/android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+        jarsigner -verbose -keystore my-release-key.jks -storepass ${{ secrets.KEYSTORE_PASSWORD }} -keypass ${{ secrets.KEY_PASSWORD }} $APK_PATH ${{ secrets.KEY_ALIAS }}
+        zipalign -v 4 $APK_PATH ${APK_PATH%.apk}-signed.apk
+
     - name: List APK outputs
       run: |
         ls -R platforms/android/app/build/outputs/apk/
