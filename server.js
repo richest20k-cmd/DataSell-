@@ -142,7 +142,8 @@ const allowedDomains = [
   'datasell.io',
   'datasell.pro',
   'datasell.shop',
-  'localhost:3000'
+  'localhost:3000',
+'datasell-5w0w.onrender.com'
 ];
 
 const corsOptions = {
