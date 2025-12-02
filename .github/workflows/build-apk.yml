@@ -1,4 +1,4 @@
-name: Build Cordova Android
+name: Build Production Cordova Android
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
       PATH: $HOME/gradle/gradle-6.9/bin:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
 
     steps:
-    - name: Checkout repository
+    - name: Checkout repo
       uses: actions/checkout@v3
 
     - name: Setup Node.js
@@ -36,22 +36,25 @@ jobs:
         curl -sSL https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -o cmdline-tools.zip
         unzip -qq cmdline-tools.zip -d $ANDROID_SDK_ROOT/cmdline-tools
         yes | $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/bin/sdkmanager --licenses
-        $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/bin/sdkmanager "platform-tools" "platforms;android-28" "build-tools;28.0.3"
-
-    - name: Create Cordova project (if missing)
-      run: |
-        if [ ! -f config.xml ]; then
-          cordova create . com.datasell.app DataSellApp
+        $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;28.0.3"
 
     - name: Add Android platform
       run: |
         cordova platform remove android || true
         cordova platform add android@9.1.0
 
-    - name: Build APK
+    - name: Build Release APK
+      env:
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
-        cordova build android --debug --no-telemetry
+        cordova build android --release --no-telemetry \
+          -- --keystore=keystore.jks \
+          --storePassword=$KEYSTORE_PASSWORD \
+          --alias=$KEY_ALIAS \
+          --password=$KEY_PASSWORD
 
     - name: List APK outputs
       run: |
-        ls -R platforms/android/app/build/outputs/apk/
+        ls -R platforms/android/app/build/outputs/apk/release/
