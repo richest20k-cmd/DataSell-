@@ -17,7 +17,6 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-        path: 'wrapper'  # Checkout into wrapper directory
     
     - name: Setup Java 17 (required for Android SDK)
       uses: actions/setup-java@v4
@@ -30,17 +29,10 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
-        cache-dependency-path: 'wrapper/package.json'
     
     - name: Install Cordova CLI
       run: |
         npm install -g cordova
-    
-    - name: Change to wrapper directory
-      run: |
-        cd wrapper
-        pwd
-        ls -la
     
     - name: Install Android SDK (manual setup)
       run: |
@@ -48,7 +40,6 @@ jobs:
         mkdir -p /usr/local/lib/android/sdk
         
         # Download and extract Android Command Line Tools
-        # Using version 9.0 which is compatible with Java 11
         cd /tmp
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
         mkdir -p /usr/local/lib/android/sdk/cmdline-tools
@@ -59,9 +50,6 @@ jobs:
         echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
         echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
         echo "PATH=/usr/local/lib/android/sdk/cmdline-tools/latest/bin:/usr/local/lib/android/sdk/platform-tools:$PATH" >> $GITHUB_ENV
-        
-        # Verify installation
-        ls -la /usr/local/lib/android/sdk/cmdline-tools/latest/bin/
     
     - name: Accept Android licenses
       run: |
@@ -69,44 +57,64 @@ jobs:
     
     - name: Install Android build tools
       run: |
-        # Install required packages (Android 13/API 33 is required for Cordova Android 14)
         sdkmanager "platform-tools"
         sdkmanager "platforms;android-33"
         sdkmanager "build-tools;33.0.0"
         sdkmanager "platforms;android-34"
         sdkmanager "build-tools;34.0.0"
     
+    - name: Check project structure
+      run: |
+        echo "Current directory: $(pwd)"
+        echo "Directory contents:"
+        ls -la
+        echo "Looking for Cordova files:"
+        find . -name "config.xml" -o -name "package.json" | head -10
+    
     - name: Install project dependencies
       run: |
-        cd wrapper
-        npm install
-        # Initialize Cordova project if not already initialized
+        # Check if we're in wrapper directory
+        if [ -f "config.xml" ]; then
+          echo "Found config.xml in current directory"
+          DIR="."
+        elif [ -f "wrapper/config.xml" ]; then
+          echo "Found config.xml in wrapper directory"
+          cd wrapper
+          DIR="wrapper"
+        else
+          echo "Error: Could not find config.xml"
+          exit 1
+        fi
+        
+        echo "Working in directory: $(pwd)"
+        
+        # Install dependencies
+        if [ -f "package.json" ]; then
+          npm install
+        else
+          echo "No package.json found, creating minimal one"
+          cat > package.json << 'EOF'
+{
+  "name": "com.datasell.app",
+  "version": "1.0.0",
+  "description": "DataSell App",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
+EOF
+          npm install cordova-android@14.0.1
+        fi
+        
+        # Initialize Cordova project
         if [ ! -d "platforms" ]; then
-          echo "Initializing Cordova project..."
-          # Check if config.xml exists (it should from your repo)
-          if [ -f "config.xml" ]; then
-            # Create a minimal package.json if missing
-            if [ ! -f "package.json" ]; then
-              cat > package.json << EOF
-              {
-                "name": "com.datasell.app",
-                "version": "1.0.0",
-                "description": "DataSell App",
-                "main": "index.js",
-                "scripts": {
-                  "test": "echo \"Error: no test specified\" && exit 1"
-                },
-                "author": "",
-                "license": "ISC"
-              }
-              EOF
-            fi
-            # Add android platform
-            cordova platform add android@14.0.1
-          else
-            echo "Error: config.xml not found in wrapper directory"
-            exit 1
-          fi
+          echo "Adding Android platform..."
+          cordova platform add android@14.0.1
+        else
+          echo "Android platform already exists"
         fi
     
     - name: Install ImageMagick for logo processing
@@ -116,46 +124,67 @@ jobs:
     
     - name: Copy logo and bundle public folder
       run: |
-        cd wrapper
+        # Determine working directory
+        if [ -f "config.xml" ]; then
+          WORK_DIR="."
+        elif [ -f "wrapper/config.xml" ]; then
+          cd wrapper
+          WORK_DIR="wrapper"
+        fi
+        
+        echo "Working in: $(pwd)"
         
         # Create images directory
         mkdir -p www/images
         
-        # Copy logo from parent directory (matching your build script)
-        if [ -f "../public/images/web-logo2.png" ]; then
-          cp "../public/images/web-logo2.png" "www/images/web-logo2.png"
-          echo "✓ Copied web-logo2.png"
-        elif [ -f "../../public/images/web-logo2.png" ]; then
-          cp "../../public/images/web-logo2.png" "www/images/web-logo2.png"
-          echo "✓ Copied web-logo2.png from parent directory"
-        else
-          echo "⚠ Warning: Logo not found, using placeholder"
-          # Create a simple placeholder using ImageMagick
-          convert -size 1024x1024 xc:#4A90E2 -pointsize 100 -fill white -gravity center -draw "text 0,0 'DS'" www/images/web-logo2.png 2>/dev/null || echo "Placeholder creation failed - continuing without custom logo"
+        # Copy logo (try multiple locations)
+        LOGO_FOUND=false
+        for LOGO_PATH in "../public/images/web-logo2.png" "../../public/images/web-logo2.png" "public/images/web-logo2.png"; do
+          if [ -f "$LOGO_PATH" ]; then
+            cp "$LOGO_PATH" "www/images/web-logo2.png"
+            echo "✓ Copied logo from: $LOGO_PATH"
+            LOGO_FOUND=true
+            break
+          fi
+        done
+        
+        if [ "$LOGO_FOUND" = false ]; then
+          echo "⚠ Warning: Logo not found, creating placeholder"
+          convert -size 1024x1024 xc:#4A90E2 -pointsize 100 -fill white -gravity center -draw "text 0,0 'DS'" www/images/web-logo2.png 2>/dev/null || echo "Placeholder creation failed"
         fi
         
-        # Copy public folder into www/app (matching your build script)
-        if [ -d "../public" ]; then
-          echo "Copying public folder to www/app..."
-          rm -rf www/app
-          mkdir -p www/app
-          cp -r ../public/. www/app/
-          echo "✓ Public folder copied"
-        elif [ -d "../../public" ]; then
-          echo "Copying public folder from parent directory..."
-          rm -rf www/app
-          mkdir -p www/app
-          cp -r ../../public/. www/app/
-          echo "✓ Public folder copied"
+        # Copy public folder
+        PUBLIC_FOUND=false
+        for PUBLIC_PATH in "../public" "../../public" "public"; do
+          if [ -d "$PUBLIC_PATH" ]; then
+            echo "Copying public folder from: $PUBLIC_PATH"
+            rm -rf www/app
+            mkdir -p www/app
+            cp -r "$PUBLIC_PATH"/. www/app/
+            echo "✓ Public folder copied"
+            PUBLIC_FOUND=true
+            break
+          fi
+        done
+        
+        if [ "$PUBLIC_FOUND" = false ]; then
+          echo "⚠ Warning: No public folder found"
         fi
         
-        # Create necessary directories to avoid errors
+        # Create necessary directories
         mkdir -p www/app/downloads
-        mkdir -p platforms/android/app/build/outputs/apk/
+        mkdir -p platforms/android/app/build/outputs/apk/ 2>/dev/null || true
     
     - name: Build Debug APK
       run: |
-        cd wrapper
+        # Determine working directory
+        if [ -f "config.xml" ]; then
+          :
+        elif [ -f "wrapper/config.xml" ]; then
+          cd wrapper
+        fi
+        
+        echo "Building debug APK..."
         cordova build android --debug \
           -- --no-daemon \
           -Dorg.gradle.jvmargs="-Xmx1200m -Dfile.encoding=UTF-8"
@@ -163,7 +192,14 @@ jobs:
     
     - name: Copy debug APK for distribution
       run: |
-        cd wrapper
+        # Determine working directory
+        if [ -f "config.xml" ]; then
+          WORK_DIR="."
+        elif [ -f "wrapper/config.xml" ]; then
+          cd wrapper
+          WORK_DIR="wrapper"
+        fi
+        
         mkdir -p dist/debug
         APK_PATH="platforms/android/app/build/outputs/apk/debug/app-debug.apk"
         
@@ -171,48 +207,57 @@ jobs:
           cp "$APK_PATH" "dist/debug/datasell-debug.apk"
           echo "Debug APK copied to dist/debug/"
           
-          # Get APK info
+          # Also copy to root dist for easy access
+          mkdir -p ../../dist/debug 2>/dev/null || mkdir -p ../dist/debug
+          cp "$APK_PATH" "../../dist/debug/datasell-debug.apk" 2>/dev/null || cp "$APK_PATH" "../dist/debug/datasell-debug.apk"
+          
           APK_SIZE=$(stat -c%s "$APK_PATH")
           APK_SIZE_MB=$(echo "scale=2; $APK_SIZE / 1048576" | bc)
           echo "Debug APK size: ${APK_SIZE_MB} MB"
           echo "debug_apk_size_mb=${APK_SIZE_MB}" >> $GITHUB_ENV
-          
-          # Copy APK to root directory for easier access
-          mkdir -p ../../dist/debug
-          cp "$APK_PATH" "../../dist/debug/datasell-debug.apk"
         else
           echo "❌ Debug APK not found at: $APK_PATH"
-          echo "Checking directory contents:"
-          find platforms/android/app/build/outputs/ -name "*.apk" 2>/dev/null || true
+          echo "Available APKs:"
+          find . -name "*.apk" 2>/dev/null || true
         fi
     
     - name: Prepare keystore for signing
       if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))
       run: |
-        cd wrapper
+        # Determine working directory
+        if [ -f "config.xml" ]; then
+          :
+        elif [ -f "wrapper/config.xml" ]; then
+          cd wrapper
+        fi
+        
         if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
-          echo "🔐 Setting up keystore for release signing..."
+          echo "🔐 Setting up keystore..."
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android-release.keystore
           
-          # Create keystore properties file from secrets
           cat > keystore.properties << EOF
-          storeFile=android-release.keystore
-          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          EOF
-          
+storeFile=android-release.keystore
+storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+EOF
           echo "✓ Keystore setup complete"
         else
-          echo "⚠ No keystore secret found. Release builds will be unsigned."
+          echo "⚠ No keystore secret found"
         fi
     
     - name: Build Release APK
       if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))
       run: |
-        cd wrapper
+        # Determine working directory
+        if [ -f "config.xml" ]; then
+          :
+        elif [ -f "wrapper/config.xml" ]; then
+          cd wrapper
+        fi
+        
         if [ -f "keystore.properties" ]; then
-          echo "🔨 Building release APK with signing..."
+          echo "🔨 Building release APK..."
           cordova build android --release \
             -- --no-daemon \
             -Dorg.gradle.jvmargs="-Xmx1200m -Dfile.encoding=UTF-8"
@@ -221,66 +266,73 @@ jobs:
           SIGNED_APK="dist/release/datasell-release-${{ github.sha }}.apk"
           
           if [ -f "$RELEASE_APK" ]; then
-            echo "✓ Release APK built successfully"
-            
-            # Create dist directory
+            echo "✓ Release APK built"
             mkdir -p dist/release
             
-            # Sign the APK
+            # Sign APK
             jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
               -keystore android-release.keystore \
               -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
               -keypass "${{ secrets.ANDROID_KEY_PASSWORD }}" \
               "$RELEASE_APK" "${{ secrets.ANDROID_KEY_ALIAS }}"
             
-            # Align with zipalign
+            # Align APK
             $ANDROID_SDK_ROOT/build-tools/34.0.0/zipalign -v 4 "$RELEASE_APK" "$SIGNED_APK"
-            
-            # Verify alignment
             $ANDROID_SDK_ROOT/build-tools/34.0.0/zipalign -c 4 "$SIGNED_APK"
             
             echo "✓ APK signed and aligned"
             
-            # Get APK info
+            # Copy to root dist
+            mkdir -p ../../dist/release 2>/dev/null || mkdir -p ../dist/release
+            cp "$SIGNED_APK" "../../dist/release/" 2>/dev/null || cp "$SIGNED_APK" "../dist/release/"
+            
             APK_SIZE=$(stat -c%s "$SIGNED_APK")
             APK_SIZE_MB=$(echo "scale=2; $APK_SIZE / 1048576" | bc)
             echo "release_apk_size_mb=${APK_SIZE_MB}" >> $GITHUB_ENV
             
-            # Copy APK to root directory for easier access
-            mkdir -p ../../dist/release
-            cp "$SIGNED_APK" "../../dist/release/datasell-release-${{ github.sha }}.apk"
-            
           else
-            echo "❌ Release APK not found at: $RELEASE_APK"
-            echo "Checking directory contents:"
-            find platforms/android/app/build/outputs/ -name "*.apk" 2>/dev/null || true
+            echo "❌ Release APK not found"
+            find . -name "*.apk" 2>/dev/null || true
             exit 1
           fi
         else
-          echo "⚠ Skipping release build (no keystore)"
+          echo "⚠ Skipping release build"
         fi
     
     - name: Upload debug APK as artifact
       uses: actions/upload-artifact@v4
       with:
         name: debug-apk
-        path: dist/debug/
-        if-no-files-found: error
+        path: |
+          dist/debug/*.apk
+          wrapper/dist/debug/*.apk
+        if-no-files-found: ignore
     
     - name: Upload release APK as artifact
       if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))
       uses: actions/upload-artifact@v4
       with:
         name: release-apk
-        path: dist/release/
+        path: |
+          dist/release/*.apk
+          wrapper/dist/release/*.apk
         if-no-files-found: ignore
     
-    - name: Extract version info from config.xml
+    - name: Extract version info
       id: version-info
       run: |
-        cd wrapper
-        VERSION=$(grep -o 'version="[^"]*"' config.xml | head -1 | sed 's/version="//;s/"//' || echo "1.0.0")
-        APP_NAME=$(grep -o '<name>[^<]*</name>' config.xml | head -1 | sed 's/<name>//;s/<\/name>//' || echo "DataSellApp")
+        # Find config.xml
+        if [ -f "config.xml" ]; then
+          CONFIG_FILE="config.xml"
+        elif [ -f "wrapper/config.xml" ]; then
+          CONFIG_FILE="wrapper/config.xml"
+        else
+          echo "Error: config.xml not found"
+          exit 1
+        fi
+        
+        VERSION=$(grep -o 'version="[^"]*"' "$CONFIG_FILE" | head -1 | sed 's/version="//;s/"//' || echo "1.0.0")
+        APP_NAME=$(grep -o '<name>[^<]*</name>' "$CONFIG_FILE" | head -1 | sed 's/<name>//;s/</name>//' || echo "DataSellApp")
         
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
@@ -291,55 +343,6 @@ jobs:
         echo "tag_name=v${VERSION}-${SHORT_SHA}" >> $GITHUB_OUTPUT
         echo "release_name=${APP_NAME} v${VERSION} (${SHORT_SHA})" >> $GITHUB_OUTPUT
     
-    - name: Generate release notes
-      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-      id: release-notes
-      run: |
-        # Get latest tag
-        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-        
-        if [ -z "$LATEST_TAG" ]; then
-          CHANGES="Initial release"
-        else
-          # Get commits since last tag
-          CHANGES=$(git log --pretty=format:"- %s (%h)" "${LATEST_TAG}"..HEAD --no-merges)
-          if [ -z "$CHANGES" ]; then
-            CHANGES="No significant changes"
-          fi
-        fi
-        
-        # Create release body
-        RELEASE_BODY=$(cat << EOF
-        ### 🚀 What's New
-        
-        ${CHANGES}
-        
-        ### 📱 Build Details
-        - **App**: ${{ steps.version-info.outputs.app_name }}
-        - **Version**: ${{ steps.version-info.outputs.version }}
-        - **Build**: ${{ steps.version-info.outputs.short_sha }}
-        - **Date**: ${{ steps.version-info.outputs.build_date }}
-        - **Cordova**: $(cd wrapper && cordova --version)
-        - **Android SDK**: 34
-        
-        ### 📦 APK Downloads
-        - **Release APK**: Signed and aligned for Google Play
-        - **Debug APK**: For testing only
-        
-        ### 🔐 Security
-        - APK is signed with release keystore
-        - SHA-256 with RSA signing
-        - Zipalign optimized
-        
-        ---
-        
-        *Built automatically with GitHub Actions*
-        EOF
-        )
-        
-        # Save to file for GitHub Actions
-        echo "$RELEASE_BODY" > release_body.md
-    
     - name: Create GitHub Release
       if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
       uses: softprops/action-gh-release@v1
@@ -348,34 +351,23 @@ jobs:
       with:
         tag_name: ${{ steps.version-info.outputs.tag_name }}
         name: ${{ steps.version-info.outputs.release_name }}
-        body_path: release_body.md
+        body: |
+          ### 🚀 DataSell Android App
+          
+          **Version**: ${{ steps.version-info.outputs.version }}
+          **Build**: ${{ steps.version-info.outputs.short_sha }}
+          **Date**: ${{ steps.version-info.outputs.build_date }}
+          
+          ### 📦 Downloads
+          - **Release APK**: Signed for production
+          - **Debug APK**: For testing
+          
+          *Automatically built with GitHub Actions*
         prerelease: false
         draft: false
         files: |
-          dist/release/*.apk
           dist/debug/*.apk
+          dist/release/*.apk
+          wrapper/dist/debug/*.apk
+          wrapper/dist/release/*.apk
         generate_release_notes: false
-    
-    - name: Tagged Release (for version tags)
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        name: ${{ steps.version-info.outputs.app_name }} ${{ github.ref_name }}
-        body: |
-          ### 🏷️ Tagged Release: ${{ github.ref_name }}
-          
-          **Version**: ${{ steps.version-info.outputs.version }}
-          **Commit**: ${{ steps.version-info.outputs.short_sha }}
-          **Build Date**: ${{ steps.version-info.outputs.build_date }}
-          
-          ### 📦 APK Downloads
-          - Release APK: Signed and ready for distribution
-          - Debug APK: For testing purposes
-          
-          ---
-          *Production release built with GitHub Actions*
-        files: |
-          dist/release/*.apk
-          dist/debug/*.apk
