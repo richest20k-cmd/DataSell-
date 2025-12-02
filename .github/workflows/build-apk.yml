@@ -16,56 +16,65 @@ jobs:
       PATH: $HOME/gradle/gradle-7.5.1/bin:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-      with:
-        persist-credentials: true
-        clean: true
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: true
+          clean: true
 
-- name: Ensure tar is installed
-  run: sudo apt-get update && sudo apt-get install -y tar
+      - name: Install system packages (unzip, zip, tar, wget)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip zip tar wget
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
+      - name: Install Cordova and Gradle
+        run: |
+          npm install -g cordova
+          mkdir -p $HOME/gradle
+          curl -sSL https://services.gradle.org/distributions/gradle-7.5.1-bin.zip -o gradle-7.5.1-bin.zip
+          unzip -qq gradle-7.5.1-bin.zip -d $HOME/gradle
 
-    - name: Install Cordova and Gradle
-      run: |
-        npm install -g cordova
-        mkdir -p $HOME/gradle
-        curl -sSL https://services.gradle.org/distributions/gradle-7.5.1-bin.zip -o gradle-7.5.1-bin.zip
-        unzip -qq gradle-7.5.1-bin.zip -d $HOME/gradle
+      - name: Setup Android SDK
+        run: |
+          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
+          curl -sSL https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -o cmdline-tools.zip
+          # Unzip and place the tools under .../cmdline-tools/latest so PATH matches
+          unzip -qq cmdline-tools.zip -d $ANDROID_SDK_ROOT/cmdline-tools
+          # Move the extracted folder to "latest" so sdkmanager is at cmdline-tools/latest/bin/sdkmanager
+          if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
+            mv $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
+          else
+            mkdir -p $ANDROID_SDK_ROOT/cmdline-tools/latest
+            mv $ANDROID_SDK_ROOT/cmdline-tools/* $ANDROID_SDK_ROOT/cmdline-tools/latest/ || true
+          fi
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-32" \
+            "build-tools;32.0.0" \
+            "platforms;android-21" \
+            "build-tools;28.0.3"
 
-    - name: Setup Android SDK
-      run: |
-        mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
-        curl -sSL https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -o cmdline-tools.zip
-        unzip -qq cmdline-tools.zip -d $ANDROID_SDK_ROOT/cmdline-tools
-        yes | $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/bin/sdkmanager --licenses
-        $ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/bin/sdkmanager \
-          "platform-tools" \
-          "platforms;android-32" \
-          "build-tools;32.0.0" \
-          "platforms;android-21" \
-          "build-tools;28.0.3"
+      - name: Create Cordova project (if missing)
+        run: |
+          if [ ! -f config.xml ]; then
+            cordova create . com.datasell.app DataSellApp
+          fi
 
-    - name: Create Cordova project (if missing)
-      run: |
-        if [ ! -f config.xml ]; then
-          cordova create . com.datasell.app DataSellApp
-        fi
+      - name: Add Android platform
+        run: |
+          cordova platform remove android || true
+          cordova platform add android@10.1.1
 
-    - name: Add Android platform
-      run: |
-        cordova platform remove android || true
-        cordova platform add android@10.1.1
+      - name: Build production APK
+        run: |
+          cordova build android --release --no-telemetry
 
-    - name: Build production APK
-      run: |
-        cordova build android --release --no-telemetry
-
-    - name: List APK outputs
-      run: |
-        ls -R platforms/android/app/build/outputs/apk/
+      - name: List APK outputs
+        run: |
+          ls -R platforms/android/app/build/outputs/apk/
